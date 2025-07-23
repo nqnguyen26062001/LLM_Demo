@@ -1,0 +1,113 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model NewsArticle {
+  id          String   @id @default(uuid())
+  title       String
+  url         String   @unique
+  description String?
+  image       String?
+  publishedAt DateTime
+  sourceName  String?
+  sourceUrl   String?
+  language    String?
+  content     String?
+
+  query       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  category    String?
+
+  location    LocationData? @relation(fields: [locationId], references: [id]) // Đây là trường ngược lại
+  locationId  String?                         // Khóa ngoại liên kết với LocationData
+}
+
+model WeatherData {
+  id          String       @id @default(uuid()) // ID duy nhất cho bản ghi thời tiết
+  locationId  String                         // Khóa ngoại liên kết với LocationData
+
+  temperature Float                          // Nhiệt độ hiện tại (temp)
+  feels_like  Float                          // Nhiệt độ cảm nhận được (feels_like)
+  temp_min    Float                          // Nhiệt độ thấp nhất (temp_min)
+  temp_max    Float                          // Nhiệt độ cao nhất (temp_max)
+  pressure    Int                            // Áp suất khí quyển (pressure)
+  humidity    Int                            // Độ ẩm (%)
+  visibility  Int?                           // Tầm nhìn (mét), có thể null nếu không có
+  windSpeed   Float                          // Tốc độ gió (m/s)
+  windDeg     Int?                           // Hướng gió (độ), có thể null
+  cloudsAll   Int?                           // Phần trăm mây (all), có thể null
+
+  description String                         // Mô tả thời tiết (ví dụ: "clear sky")
+  icon        String                         // Icon thời tiết (ví dụ: "01d")
+  main        String                         // Trạng thái thời tiết chính (ví dụ: "Clear")
+
+  sunrise     DateTime?                      // Thời gian mặt trời mọc (UTC)
+  sunset      DateTime?                      // Thời gian mặt trời lặn (UTC)
+  timezoneOffset Int?                        // Độ lệch múi giờ so với UTC (giây), có thể null
+
+  timestamp   DateTime                       // Thời điểm dữ liệu thời tiết được lấy (dt)
+
+  createdAt   DateTime     @default(now())  // Thời điểm tạo bản ghi trong DB
+
+  location    LocationData @relation(fields: [locationId], references: [id]) // Đây là trường ngược lại
+  @@unique([locationId, timestamp])
+}
+
+model LocationData {
+  id        String    @id @default(uuid()) // ID duy nhất cho mỗi địa điểm
+  name      String    @unique               // Tên địa điểm, đảm bảo không trùng lặp
+  point     Unsupported("geometry(Point, 4326)") 
+
+  createdAt DateTime  @default(now())      // Thời điểm tạo bản ghi
+  updatedAt DateTime  @updatedAt            // Thời điểm cập nhật cuối cùng
+
+  // Mối quan hệ với các bảng khác
+  weather   WeatherData[]                 
+  news      NewsArticle[]                    
+  routesFrom RouteData[] @relation("StartLocation") // Tuyến đường bắt đầu từ đây
+  routesTo   RouteData[] @relation("EndLocation")   // Tuyến đường kết thúc tại đây
+  routeWaypoints RouteWaypoint[] // Mối quan hệ ngược từ LocationData đến RouteWaypoint
+
+}
+
+model RouteWaypoint {
+  id              String       @id @default(uuid())
+  routeId         String
+  locationId      String
+  order           Int          // Thứ tự của waypoint trong tuyến đường
+  createdAt  DateTime @default(now()) @map("createdAt") @db.Timestamptz(6) // <--- Add this
+  updatedAt  DateTime @updatedAt @map("updatedAt") @db.Timestamptz(6) // <--- Add this
+
+  route           RouteData    @relation(fields: [routeId], references: [id])
+  location        LocationData @relation(fields: [locationId], references: [id])
+
+  @@unique([routeId, order]) // Đảm bảo thứ tự duy nhất cho mỗi tuyến đường
+  @@unique([routeId, locationId]) // Đảm bảo một địa điểm không bị lặp lại trong một tuyến đường
+}
+
+
+model RouteData {
+  id                String    @id @default(uuid()) // ID duy nhất cho tuyến đường
+  startLocationId   String                         // ID địa điểm bắt đầu
+  startLocation     LocationData @relation("StartLocation", fields: [startLocationId], references: [id])
+  endLocationId     String                         // ID địa điểm kết thúc
+  endLocation       LocationData @relation("EndLocation", fields: [endLocationId], references: [id])
+  path_geometry     Unsupported("geometry(LineString, 4326)")
+
+  waypoints       RouteWaypoint[] // Mối quan hệ với bảng liên kết waypoint
+
+  duration_seconds  Float                          // Thời gian di chuyển (giây)
+  distance_meters   Float                          // Khoảng cách (mét)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  // @@unique([startLocationId, endLocationId]) // <--- THIS IS CRUCIAL
+  @@map("RouteData")
+
+}
