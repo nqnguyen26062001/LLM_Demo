@@ -6,6 +6,7 @@
   "scripts": {
     "start": "ts-node src/index.ts",
     "main": "ts-node src/main.ts",
+    "sample": "ts-node src/sample.ts",
     "seed": "ts-node prisma/seed.ts",
     "dev": "ts-node service/sqlToolkit.ts",
     "crawler": "ts-node src/crawler"
@@ -22,9 +23,11 @@
   },
   "dependencies": {
     "@chroma-core/default-embed": "^0.1.8",
+    "@googlemaps/js-api-loader": "^1.16.10",
     "@langchain/community": "^0.3.49",
     "@langchain/core": "^0.3.62",
     "@langchain/google-genai": "^0.2.14",
+    "@modelcontextprotocol/sdk": "^1.17.0",
     "@prisma/client": "^6.11.1",
     "@types/express": "^5.0.3",
     "axios": "^1.10.0",

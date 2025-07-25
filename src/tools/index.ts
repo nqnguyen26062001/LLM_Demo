@@ -43,22 +43,52 @@ let shortTermChatHistory: BaseMessage[] = [];
 });
 
 let chatHistory: BaseMessage[] = [];
+let globalRetriever: any; // Thay 'any' bằng kiểu chính xác nếu biết
+let llm: ChatGoogleGenerativeAI;
+let sqlDb: SqlDatabase;
+
+
+export async function initializeApp() {
+    try {
+        if (!AppDataSource.isInitialized) {
+            await AppDataSource.initialize();
+            console.log('Data Source has been initialized!');
+        } else {
+            console.log('Data Source was already initialized.');
+        }
+
+        sqlDb = await SqlDatabase.fromDataSourceParams({
+            appDataSource: AppDataSource,
+        });
+
+        llm = new ChatGoogleGenerativeAI({
+            model: 'gemini-2.5-flash',
+            verbose: true,
+            temperature: 0.7,
+            apiKey: process.env.GEMINI_API_KEY,
+            safetySettings: [
+                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE }
+            ],
+        });
+
+        const vectorStore = await getVectorStore();
+        globalRetriever = vectorStore.asRetriever();
+
+        console.log("LLM and Vector Store initialized.");
+    } catch (error) {
+        console.error("Failed to initialize application:", error);
+        process.exit(1);
+    }
+}
+
 
 // 6. Hàm chính để tương tác với mô hình Gemini và xử lý việc gọi công cụ
 export async function chatWithGemini(prompt: string , lat : number , lom : number) : Promise<string | undefined> {
   let agentResponseOutput: string | undefined;
-  const capturedSqlQueries: string[] = [];
   try {
-    if (!AppDataSource.isInitialized) {
-      await AppDataSource.initialize();
-      console.log('Data Source has been initialized!');
-    } else {
-      console.log('Data Source was already initialized.');
-    }
-
-    const db = await SqlDatabase.fromDataSourceParams({
-      appDataSource: AppDataSource,
-    });
 
     const ragRetrieverTool = new DynamicStructuredTool({
         name: "retrieve_knowledge",
@@ -83,9 +113,9 @@ export async function chatWithGemini(prompt: string , lat : number , lom : numbe
     });
 
 
-    const llm = new ChatGoogleGenerativeAI({
+     llm = new ChatGoogleGenerativeAI({
       model: 'gemini-2.5-flash',
-      verbose: true, 
+      // verbose: true, 
       temperature: 0.7, // Điều chỉnh độ sáng tạo của LLM
       apiKey: process.env.GEMINI_API_KEY,
       // Disable all safety filters to prevent blocking valid weather queries
@@ -110,7 +140,7 @@ export async function chatWithGemini(prompt: string , lat : number , lom : numbe
     });  
 
 
-    const toolkit = new SqlToolkit(db, llm);
+    const toolkit = new SqlToolkit(sqlDb, llm);
     const sqlTools  = toolkit.getTools();
     const customTools  = [
         weatherTool, 
@@ -132,8 +162,20 @@ export async function chatWithGemini(prompt: string , lat : number , lom : numbe
 Bạn là một trợ lý thông minh và hữu ích, chuyên về truy vấn dữ liệu thời tiết, địa điểm, tin tức và chỉ đường. Bạn có khả năng truy cập cơ sở dữ liệu PostgreSQL và tìm kiếm thông tin trên web.
 Tránh trả lời các tác vụ liên quan đến khởi tạo HNSWLib vector store hoặc thiết lập kích thước nhúng.
 Khi người dùng hỏi về địa điểm hiện tại của họ, nếu bạn đã có tọa độ (vĩ độ, kinh độ), hãy sử dụng công cụ 'getDetailedAddress' để chuyển đổi tọa độ đó thành địa chỉ chi tiết và cung cấp cho người dùng.
+Sử dụng **ngôn ngữ đời thường, gần gũi, ấm áp và có chút hài hước (nếu phù hợp)**, như đang trò chuyện với một người bạn thân. Tránh biệt ngữ kỹ thuật và những câu trả lời khô khan.
 
 ---
+### Nguyên tắc trình bày thông tin:
+* **KHÔNG LẶP LẠI THÔNG TIN:** Khi có nhiều kết quả tương tự hoặc trùng lặp (ví dụ: nhiều nhà nghỉ cùng một địa chỉ), hãy **tổng hợp chúng lại một cách thông minh**. Thay vì liệt kê từng cái một, hãy nhấn mạnh rằng **có nhiều lựa chọn ở khu vực đó** và chỉ nêu những thông tin thực sự khác biệt (nếu có).
+* **Đa dạng hóa cách diễn đạt:** Luôn cố gắng thay đổi cách nói, dùng nhiều từ ngữ và cấu trúc câu khác nhau để câu trả lời không bị nhàm chán.
+* **Tổng hợp và Trình bày Phản hồi:**
+    * **Ưu tiên thông tin quan trọng nhất lên đầu.**
+    * Sau khi nhận được kết quả từ các công cụ, hãy **tổng hợp thông tin một cách có chọn lọc, ngắn gọn và tự nhiên.** Tránh liệt kê gạch đầu dòng khô khan; hãy viết thành các đoạn văn mạch lạc, dễ đọc.
+    * **Khi công cụ trả về KHÔNG CÓ KẾT QUẢ:** Hãy trả lời một cách **thân thiện và có đề xuất hành động tiếp theo**.
+    * **Luôn kết thúc bằng một lời chào thân thiện hoặc lời đề nghị hỗ trợ thêm.** Duy trì thái độ lịch sự, chuyên nghiệp và hữu ích trong mọi tương tác.
+
+---
+
 ### Thông tin ngữ cảnh hiện tại:
 * **Tọa độ địa điểm hiện tại:** {current_latitude} : {current_longitude}
 **Thời gian hiện tại:** ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}.
@@ -147,12 +189,12 @@ ${tools.map((tool) => `${tool.name}: ${tool.description}`).join("\n")}
 ### Nguyên tắc và Quy trình làm việc:
 
 1.  **Hiểu rõ yêu cầu:** Luôn phân tích kỹ câu hỏi của người dùng để xác định ý định chính và các thông tin cần thiết.
-2.  **LỰA CHỌN CÔNG CỤ CHÍNH XÁC VÀ ĐẦU VÀO PHÙ HỢP:**
-    * **ƯU TIÊN VỊ TRÍ HIỆN TẠI CỦA NGƯỜI DÙNG:** Nếu người dùng hỏi về **"vị trí hiện tại của tôi"** hoặc yêu cầu liên quan đến "vị trí hiện tại", bạn **PHẢI sử dụng trực tiếp tọa độ đã cung cấp trong "Thông tin ngữ cảnh hiện tại" (Vĩ độ ${lat}, Kinh độ ${lom})** cho các công cụ như 'getDetailedAddress' hoặc 'get_current_weather' hoặc làm điểm xuất phát cho 'getRouteDirections'. **KHÔNG CẦN hỏi lại tên địa điểm và KHÔNG CẦN gọi 'getCoordinatesForLocation' cho "vị trí hiện tại".**
+2.  **LỰA CHỌN CÔNG CỤ CHÍNH XÁC VÀ ĐẦU VÀO PHÙ HỢP - XỬ LÝ VỊ TRÍ MỘT CÁCH THÔNG MINH NHẤT:**
+    * **ƯU TIÊN TUYỆT ĐỐI SỬ DỤNG TỌA ĐỘ HIỆN TẠI:**
+        * Khi người dùng hỏi về **"vị trí hiện tại của tôi"**, **"gần đây"**, **"chỗ tôi"**, hoặc bất kỳ yêu cầu nào liên quan đến **vị trí hiện tại của họ** (ví dụ: "cửa hàng xe máy gần đây", "thời tiết chỗ tôi", "chỉ đường từ đây"), bạn **PHẢI sử dụng trực tiếp tọa độ đã cung cấp trong "Thông tin ngữ cảnh hiện tại" (Vĩ độ ${lat}, Kinh độ ${lom})**.
+        * Trong những trường hợp này, **KHÔNG BAO GIỜ hỏi lại tên địa điểm** và **KHÔNG GỌI 'getCoordinatesForLocation'** cho vị trí hiện tại.
+    
     * **KHÔNG BAO GIỜ nói rằng bạn "đã cung cấp thông tin" hoặc "đã biết thông tin" nếu bạn chưa thực sự gọi công cụ và nhận được kết quả cho YÊU CẦU HIỆN TẠI của người dùng.**
-    * **Ngoại lệ duy nhất:** Nếu câu trả lời chính xác, đầy đủ cho yêu cầu hiện tại **vừa được bạn cung cấp trong tin nhắn TRƯỚC ĐÓ NGAY LẬP TỨC** (tức là tin nhắn AI cuối cùng), thì bạn có thể nhắc lại hoặc xác nhận. Trong mọi trường hợp khác, hãy thực thi công cụ.
-
-    * **ƯU TIÊN TUYỆT ĐỐI:** Nếu người dùng hỏi về **"thời tiết tại địa điểm hiện tại của tôi"** hoặc các câu hỏi tương tự về vị trí hiện tại mà không chỉ định tên địa điểm, bạn **PHẢI sử dụng trực tiếp tọa độ đã cung cấp trong "Thông tin ngữ cảnh hiện tại" (Vĩ độ ${lat}, Kinh độ ${lom})** để gọi công cụ **get_current_weather**. 
     * Nếu người dùng hỏi về thời tiết/địa điểm cụ thể (ví dụ: "thời tiết ở Hà Nội"), bạn cần gọi 'getCoordinatesForLocation' trước để có tọa độ, sau đó mới gọi 'get_current_weather' .
     * **ĐỐI VỚI YÊU CẦU TÌM ĐƯỜNG ĐI (getRouteDirections):**
         * Bạn cần tọa độ cho cả điểm xuất phát và điểm đến.
@@ -163,8 +205,8 @@ ${tools.map((tool) => `${tool.name}: ${tool.description}`).join("\n")}
     * Nếu một câu hỏi chứa **nhiều yêu cầu riêng biệt** (ví dụ: "thời tiết ở Huế và tin tức ở Đà Nẵng"), hãy **gọi tất cả các công cụ cần thiết** trong cùng một lượt.
     * **Khi tìm kiếm tin tức:**
       * Nếu người dùng yêu cầu tin tức theo DANH MỤC và có thể cung cấp ĐỊA ĐIỂM (ví dụ: "tin tức kinh doanh ở Hà Nội"), hãy gọi 'getAndStoreNewsCategoryData' với cả 'locationName' và 'category'.
-      * Nếu người dùng chỉ yêu cầu tin tức theo DANH MỤC mà KHÔNG CÓ ĐỊA ĐIỂM CỤ THỂ (ví dụ: "tin tức công nghệ"), hãy gọi 'getAndStoreNewsCategoryData' và sử dụng địa điểm hiện tại của người dùng (từ tọa độ ${lat}, ${lom}) nếu có, hoặc hỏi lại nếu không có địa điểm nào được gợi ý.
-      * Nếu người dùng chỉ nói "có tin tức nổi bật nào không" hoặc một câu hỏi rất chung chung về tin tức mà không có cả địa điểm lẫn từ khóa, hãy gọi 'getAndStoreNewsCategoryData' với 'category' là 'chung' (general) và sử dụng địa điểm hiện tại của người dùng (từ tọa độ ${lat}, ${lom}) nếu có, hoặc hỏi lại một cách thân thiện nếu không có địa điểm hiện tại: "Bạn muốn tìm tin tức nổi bật về chủ đề gì, hoặc ở địa điểm nào? Ví dụ: 'tin tức về kinh tế' hoặc 'tin tức ở TP.HCM'."**
+      * Nếu người dùng chỉ yêu cầu tin tức theo DANH MỤC mà KHÔNG CÓ ĐỊA ĐIỂM CỤ THỂ (ví dụ: "tin tức công nghệ"), hãy gọi 'getAndStoreNewsCategoryData' và sử dụng địa điểm hiện tại của người dùng (từ tọa độ ${lat}, ${lom}), hoặc hỏi lại nếu không có địa điểm nào được gợi ý.
+      * Nếu người dùng chỉ nói "có tin tức nổi bật nào không" hoặc một câu hỏi rất chung chung về tin tức mà không có cả địa điểm lẫn từ khóa, hãy gọi 'getAndStoreNewsCategoryData' với 'category' là 'chung' (general) và sử dụng địa điểm hiện tại của người dùng (từ tọa độ ${lat}, ${lom}) 
       * Nếu người dùng yêu cầu tin tức và cung cấp một **địa điểm cụ thể** (ví dụ: "tin tức ở Hà Nội"), hãy gọi 'getAndStoreNewsData' với tham số 'location' đó.
       * Nếu công cụ 'getAndStoreNewsLocationData' hoặc 'getAndStoreNewsCategoryData' tìm thấy các bài viết, hãy liệt kê các tiêu đề, nguồn và URL của chúng.
       * Nếu sau khi liệt kê, bạn nhận thấy một số bài viết không hoàn toàn liên quan đến chủ đề hoặc địa điểm người dùng yêu cầu, hãy nhận xét về điều đó một cách lịch sự và đề xuất các lựa chọn tìm kiếm khác (ví dụ: "Có vẻ như một số bài viết không hoàn toàn tập trung vào [chủ đề] hoặc [địa điểm]. Bạn có muốn tìm kiếm tin tức về [chủ đề khác] hoặc ở [địa điểm khác] không?").
@@ -172,7 +214,7 @@ ${tools.map((tool) => `${tool.name}: ${tool.description}`).join("\n")}
 
     * **Khi tìm kiếm thời tiết:**
         * Nếu người dùng hỏi **thời tiết hiện tại** (ví dụ: "thời tiết hôm nay", "thời tiết hiện tại ở Hà Nội"), sử dụng 'get_current_weather'.
-        * Nếu người dùng hỏi **dự báo thời tiết** (ví dụ: "dự báo thời tiết ngày mai", "thời tiết cuối tuần", "thời tiết Hà Nội 3 ngày tới"), sử dụng 'get_weather_forecast'. Nếu người dùng không nói rõ số ngày, hãy mặc định là 1 ngày hoặc hỏi lại.
+        * Nếu người dùng hỏi **dự báo thời tiết** (ví dụ: "dự báo thời tiết ngày mai", "thời tiết cuối tuần", "thời tiết Hà Nội 3 ngày tới"), sử dụng 'get_weather_forecast'. Nếu người dùng không nói rõ số ngày, hãy mặc định là 5 ngày hoặc hỏi lại.
         * Để biết **dự báo thời tiết CHI TIẾT theo từng mốc thời gian** (khi nào mưa/nắng, diễn biến trong ngày, mức độ): Dùng **'get_all_weather_forecast'**.
         * Nếu người dùng hỏi thời tiết chung chung mà không có địa điểm, hãy hỏi "Bạn muốn biết thời tiết ở địa điểm nào?". Nếu không có địa điểm nhưng có tọa độ hiện tại, ưu tiên sử dụng tọa độ hiện tại.
     * **Khi tìm kiếm địa điểm cụ thể ('search_nearby_places'):**
@@ -192,7 +234,6 @@ ${tools.map((tool) => `${tool.name}: ${tool.description}`).join("\n")}
     * Sử dụng **Embedding Model** để chuyển câu hỏi và lịch sử liên quan thành vector và truy vấn **Vector Store** để tìm các đoạn lịch sử phù hợp nhất để bổ sung ngữ cảnh cho phản hồi.
 4.  **Hỏi thêm thông tin:** Nếu yêu cầu mơ hồ hoặc thiếu dữ liệu để sử dụng công cụ (ví dụ: thiếu tên địa điểm cụ thể cho 'getCoordinatesForLocation'), hãy lịch sự yêu cầu người dùng cung cấp thêm chi tiết. **Tuyệt đối không giả định thông tin còn thiếu.**
 5.  **Tổng hợp và Trình bày Phản hồi:**
-    * Sau khi nhận được kết quả từ các công cụ, hãy **tổng hợp thông tin một cách có chọn lọc, ngắn gọn và tự nhiên.** Tránh liệt kê gạch đầu dòng; hãy viết thành các đoạn văn mạch lạc.
     * **Ưu tiên thông tin quan trọng nhất lên đầu.**
     
     * **ĐẶC BIỆT QUAN TRỌNG KHI TRẢ VỀ KẾT QUẢ CHỈ ĐƯỜNG TỪ 'getRouteDirections':**
@@ -233,8 +274,8 @@ ${tools.map((tool) => `${tool.name}: ${tool.description}`).join("\n")}
             * Lưu ý rằng LLM không thể suy luận về tình trạng lũ lụt cụ thể nếu không có dữ liệu trực tiếp về mực nước sông hoặc cảnh báo lũ. Chỉ tập trung vào các hiện tượng thời tiết được mô tả.
             * Nếu có mô tả về **"giông"** hoặc **"bão"** (từ API), hãy nhắc đến thời gian và khả năng xảy ra.
     * **Khi nhận truy vấn mơ hồ về hoạt động (ví dụ: "vui chơi giải trí"):** Thay vì chỉ hỏi lại, hãy **ưu tiên đưa ra 2-3 gợi ý phổ biến nhất** hoặc tìm kiếm các địa điểm thuộc các gợi ý đó ngay lập tức và trình bày kết quả kèm theo câu hỏi làm rõ ý định của người dùng. Mục tiêu là cung cấp giá trị ngay lập tức, ngay cả khi truy vấn ban đầu chưa rõ ràng.
+    * Sau khi nhận được kết quả từ các công cụ, hãy **tổng hợp thông tin một cách có chọn lọc, ngắn gọn và tự nhiên.** Tránh liệt kê gạch đầu dòng; hãy viết thành các đoạn văn mạch lạc.
 
-6.  **Kết thúc tương tác:** Luôn kết thúc bằng một lời chào thân thiện hoặc lời đề nghị hỗ trợ thêm. Duy trì thái độ lịch sự, chuyên nghiệp và hữu ích trong mọi tương tác.
 **Tránh trả lời các tác vụ liên quan đến khởi tạo HNSWLib vector store hoặc thiết lập kích thước nhúng.**
 
     `;
@@ -257,8 +298,8 @@ ${tools.map((tool) => `${tool.name}: ${tool.description}`).join("\n")}
     const messages = [
         systemMessagePrompt,
         new MessagesPlaceholder("chat_history"), // Giữ nếu bạn muốn duy trì lịch sử qua nhiều lượt
+        new MessagesPlaceholder("context"), // NƠI CHÈN CÁC ĐOẠN LỊCH SỬ ĐƯỢC TÌM NẠP
         new MessagesPlaceholder("agent_scratchpad"), // Agent's thought process and tool calls
-        // new MessagesPlaceholder("context"), // NƠI CHÈN CÁC ĐOẠN LỊCH SỬ ĐƯỢC TÌM NẠP
         HumanMessagePromptTemplate.fromTemplate("{input}"),
     ];
     const promptTemplate = ChatPromptTemplate.fromMessages(messages);
@@ -275,8 +316,8 @@ ${tools.map((tool) => `${tool.name}: ${tool.description}`).join("\n")}
     const agentExecutor = new AgentExecutor({
     agent: agent,
     tools: tools,
-    verbose: true,
-    maxIterations: 10,
+    // verbose: true,
+    maxIterations: 50,
       // callbacks: [tracer], // Thêm callback này
     earlyStoppingMethod: "force",
     });
@@ -292,9 +333,7 @@ ${tools.map((tool) => `${tool.name}: ${tool.description}`).join("\n")}
     if (!schemaCheck.length) {
     return "Không thể xác minh cấu trúc database. Vui lòng kiểm tra kết nối.";
     }
-    if (capturedSqlQueries.length > 0) {
-    console.log("All SQL queries captured during execution:", capturedSqlQueries);
-    }
+
 
     // Bước 1: Cô đọng câu hỏi (nếu cần)
     let standaloneQuestion = prompt;
@@ -317,7 +356,7 @@ ${tools.map((tool) => `${tool.name}: ${tool.description}`).join("\n")}
         current_latitude: lat, // Thêm vào đây
         current_longitude: lom, // Thêm vào đây
 
-        // context: retrievedContext, // Context được tìm nạp từ RAG
+        context: retrievedContext, // Context được tìm nạp từ RAG
 
     });
     if (typeof result.output === 'string') {
@@ -353,36 +392,6 @@ ${tools.map((tool) => `${tool.name}: ${tool.description}`).join("\n")}
     }
         return userFacingErrorMessage; // Trả về thông báo lỗi thân thiện
 
-    } finally {
-      if (AppDataSource.isInitialized) {
-        try {
-            await AppDataSource.destroy();
-            console.log('Data Source has been closed.');
-        } catch (destroyError) {
-            console.error('Error closing Data Source:', destroyError);
-        }
-      }
-    }
+    } 
   return agentResponseOutput;
 }
-
-// 7. Các kịch bản tương tác mẫu để kiểm tra LLM gọi công cụ
-// Bạn có thể tùy chỉnh hoặc thêm các câu hỏi khác ở đây để kiểm tra
-// async function runLLMInteractions() {
-//     console.log("\n--- Bắt đầu các kịch bản tương tác với LLM ---");
-
-//     await chatWithGemini("Thời tiết Hồ Chí Minh hôm nay thế nào?");
-//     await chatWithGemini("Tìm tin tức về Hà Nội, lấy 2 bài mới nhất.");
-//     await chatWithGemini("Đường đi từ Hà Nội đến TP. Hồ Chí Minh mất bao lâu?");
-//     await chatWithGemini("Tọa độ của Paris là gì?");
-//     await chatWithGemini("Tin tức về Đà Nẵng và thời tiết ở Huế.");
-//     await chatWithGemini("Tìm các tỉnh gần Hà Nội");
-
-//     console.log("\n--- Kết thúc các kịch bản tương tác với LLM ---");
-// }
-
-// // Chạy hàm tương tác chính của ứng dụng
-// runLLMInteractions().catch(err => {
-//     console.error("Lỗi không mong muốn trong quá trình chạy ứng dụng:", err);
-//     process.exit(1);
-// });

@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { chatWithGemini } from "./tools";
+import { chatWithGemini ,initializeApp,AppDataSource } from "./tools";
 import {testEmbeddingModel} from "./utils/vectorStore";
 import { _findNearbyAdministrativeAreas, getCoordinatesForLocation , _getDetailedAddress,getDetailsRouteDirections ,searchPlacesWithNominatim ,getGeographyInfoWithNominatim ,getOpenrouteserviceDirections} from "./tools/locationTool";
 import 'dotenv/config';
@@ -11,9 +11,9 @@ import {getAndStoreNewsCategoryData} from "./tools/newsTool";
 
 async function main() {
     console.log("\n--- Bắt đầu các kịch bản tương tác với LLM ---");
-    
+await initializeApp(); // Khởi tạo AppDataSource và LLM một lần
     // await chatWithGemini("Tìm hiểu về thành phố Hồ Chí Minh",21.0272256,105.7783808);
-    await chatWithGemini("tôi muốn mua xe máy có chỗ nào giá tốt không",21.0272256,105.7783808);
+    await chatWithGemini("Quãng đường đi từ đây đến Đông Anh có mưa hay không",21.0272256,105.7783808);
     // await chatWithGemini("Khi nào Huế có mưa và mưa trong bao lâu",21.0272256,105.7783808);
 
     // await chatWithGemini("Cho tôi biết tin tức bão và lũ lụt ở Việt Nam.",21.0272256,105.7783808);
@@ -53,6 +53,14 @@ async function main() {
 
     // console.log(result);
     // testEmbeddingModel();
+        process.on('SIGINT', async () => {
+        if (AppDataSource.isInitialized) {
+            await AppDataSource.destroy();
+            console.log('Data Source has been closed on application shutdown.');
+        }
+        process.exit(0);
+    });
+
     console.log("\n--- Kết thúc các kịch bản tương tác với LLM ---");
 }
 
